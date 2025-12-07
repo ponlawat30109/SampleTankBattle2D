@@ -1,0 +1,73 @@
+using System.Collections;
+using UnityEngine;
+using UnityEngine.UIElements;
+
+public class ClientRoundUI : MonoBehaviour
+{
+    public static ClientRoundUI Instance { get; private set; }
+
+    private readonly string centerText = "centerText";
+    private readonly string countdownText = "countdownText";
+
+    private UIDocument _uiDoc;
+    private Label _centerLabel;
+    private Label _countdownLabel;
+    private Coroutine _countdownCoroutine;
+
+    void Awake()
+    {
+        Instance = this;
+
+        _uiDoc = GetComponent<UIDocument>();
+    }
+
+    void Start()
+    {
+        if (_uiDoc == null)
+            return;
+
+        var root = _uiDoc.rootVisualElement;
+        _centerLabel = root.Q<Label>(centerText);
+        _countdownLabel = root.Q<Label>(countdownText);
+
+        HideAll();
+    }
+
+    public void ShowDeathAndStartCountdown(string message, float seconds)
+    {
+        if (_uiDoc == null) return;
+        if (_countdownCoroutine != null)
+            StopCoroutine(_countdownCoroutine);
+
+        _centerLabel.text = message;
+        _centerLabel.style.display = DisplayStyle.Flex;
+        _countdownCoroutine = StartCoroutine(CountdownRoutine(seconds));
+    }
+
+    private IEnumerator CountdownRoutine(float seconds)
+    {
+        float remaining = seconds;
+        while (remaining > 0f)
+        {
+            _countdownLabel.text = Mathf.CeilToInt(remaining).ToString();
+            _countdownLabel.style.display = DisplayStyle.Flex;
+            yield return new WaitForSeconds(1f);
+            remaining -= 1f;
+        }
+
+        _countdownLabel.text = "0";
+        yield return new WaitForSeconds(0.5f);
+
+        HideAll();
+
+        _countdownCoroutine = null;
+    }
+
+    public void HideAll()
+    {
+        if (_centerLabel != null)
+            _centerLabel.style.display = DisplayStyle.None;
+        if (_countdownLabel != null)
+            _countdownLabel.style.display = DisplayStyle.None;
+    }
+}
