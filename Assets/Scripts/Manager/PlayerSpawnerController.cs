@@ -1,144 +1,115 @@
 using UnityEngine;
-using FishNet.Managing;
-using FishNet.Managing.Server;
-using FishNet.Connection;
-using FishNet.Component.Spawning;
-using FishNet.Object;
 using FishNet;
+using FishNet.Connection;
+using FishNet.Managing;
+using FishNet.Object;
+using System.Collections.Generic;
 
 public class PlayerSpawnerController : MonoBehaviour
 {
-    [field: SerializeField] public GameObject PlayerPrefab { get; set; }
-    [field: SerializeField] public Transform[] SpawnPoints { get; set; }
-    // public PlayerSpawner FishnetPlayerSpawner { get; set; }
+    [SerializeField] private GameObject PlayerPrefab;
+    [SerializeField] private Transform[] SpawnPoints;
 
-    public Vector2 ViewportMin { get; set; } = new(0.1f, 0.1f);
-    public Vector2 ViewportMax { get; set; } = new(0.9f, 0.9f);
-
-    private NetworkManager _netManager;
+    private NetworkManager _netmanager;
+    private Dictionary<int, int> _assigned = new();
 
     private void Awake()
     {
-        _netManager = InstanceFinder.NetworkManager;
-
-        if (_netManager == null)
-            return;
-
-        // if (FishnetPlayerSpawner == null)
-        // {
-        //     FishnetPlayerSpawner = GetComponent<PlayerSpawner>();
-        // }
-
-        // if (FishnetPlayerSpawner != null)
-        // {
-        //     if (PlayerPrefab != null)
-        //     {
-        //         if (PlayerPrefab.TryGetComponent<NetworkObject>(out var nob))
-        //             FishnetPlayerSpawner.SetPlayerPrefab(nob);
-        //     }
-        // }
-        // else
-        // {
-        //     _netManager.ServerManager.OnRemoteConnectionState += ServerManager_OnRemoteConnectionState;
-        // }
-
-        _netManager.ServerManager.OnRemoteConnectionState += ServerManager_OnRemoteConnectionState;
-        // _netManager.ClientManager.OnClientConnectionState += ClientManager_OnClientConnectionState;
-
+        _netmanager = InstanceFinder.NetworkManager;
+        if (_netmanager != null)
+        {
+            _netmanager.ServerManager.OnRemoteConnectionState += OnRemoteState;
+        }
     }
 
     private void OnDestroy()
     {
-        if (_netManager != null)
+        if (_netmanager != null)
         {
-            try { _netManager.ServerManager.OnRemoteConnectionState -= ServerManager_OnRemoteConnectionState; } catch { }
-            // try { _netManager.ClientManager.OnClientConnectionState -= ClientManager_OnClientConnectionState; } catch { }
+            _netmanager.ServerManager.OnRemoteConnectionState -= OnRemoteState;
         }
     }
 
-    private void ServerManager_OnRemoteConnectionState(NetworkConnection conn, FishNet.Transporting.RemoteConnectionStateArgs args)
+    private void OnRemoteState(NetworkConnection conn, FishNet.Transporting.RemoteConnectionStateArgs args)
     {
         if (args.ConnectionState == FishNet.Transporting.RemoteConnectionState.Started)
         {
-            if (_netManager.IsServerStarted)
+            if (_netmanager.IsServerStarted)
             {
-                SpawnPlayer(conn);
+                Spawn(conn);
             }
+        }
+        else if (args.ConnectionState == FishNet.Transporting.RemoteConnectionState.Stopped)
+        {
+            _assigned.Remove(conn.ClientId);
         }
     }
 
-    // private void ClientManager_OnClientConnectionState(FishNet.Transporting.ClientConnectionStateArgs args)
-    // {
-    //     if (args.ConnectionState == FishNet.Transporting.LocalConnectionState.Started)
-    //     {
-    //         if (_netManager.IsServerStarted)
-    //         {
-    //             SpawnPlayer(_netManager.ClientManager.Connection);
-    //         }
-    //     }
-    // }
-
-    private void SpawnPlayer(NetworkConnection conn)
+    private void Spawn(NetworkConnection conn)
     {
         if (PlayerPrefab == null)
             return;
 
-        Vector3 spawnPos = Vector3.zero;
+        Vector3 pos = Vector3.zero;
+        int count = SpawnPoints?.Length ?? 0;
+        int client = conn.ClientId;
 
-        if (SpawnPoints != null && SpawnPoints.Length > 0)
+        int index = 0;
+        if (count > 0)
         {
-            int spawnCount = SpawnPoints.Length;
-            int clientId = conn.ClientId;
-            int spawnIndex;
-
-            if (spawnCount >= 2)
+            if (_assigned.TryGetValue(client, out var e))
             {
-                int half = spawnCount / 2;
+                index = Mathf.Clamp(e, 0, count - 1);
+            }
+            else if (_assigned.Count == 0)
+            {
+                index = Assign(client, Random.Range(0, count));
+            }
+            else if (_assigned.Count == 1 && count % 2 == 0)
+            {
+                int other = 0;
+                foreach (var v in _assigned.Values)
+                {
+                    other = v;
+                    break;
+                }
 
-                if (spawnCount % 2 == 0)
-                {
-                    int primary = clientId / 2;
-                    int primaryMod = (half > 0) ? (primary % half) : 0;
-                    spawnIndex = (clientId % 2 == 0) ? primaryMod : (primaryMod + half);
-                }
-                else
-                {
-                    spawnIndex = clientId % spawnCount;
-                }
+                int opp = (other + count / 2) % count;
+                index = _assigned.ContainsValue(opp) ? Assign(client, NearestFree(client % count, count)) : Assign(client, opp);
             }
             else
             {
-                spawnIndex = 0;
+                index = Assign(client, NearestFree(client % count, count));
             }
 
-            spawnIndex = Mathf.Clamp(spawnIndex, 0, spawnCount - 1);
-
-            Transform t = SpawnPoints[spawnIndex];
-            if (t != null)
-            {
-                spawnPos = t.position;
-            }
-            else
-            {
-                for (int i = 0; i < spawnCount; i++)
-                {
-                    if (SpawnPoints[i] != null)
-                    {
-                        spawnPos = SpawnPoints[i].position;
-                        break;
-                    }
-                }
-            }
+            pos = SpawnPoints[index]?.position ?? SpawnPoints[0].position;
         }
 
-        GameObject go = Instantiate(PlayerPrefab, spawnPos, Quaternion.identity);
-
+        var go = Instantiate(PlayerPrefab, pos, Quaternion.identity);
         if (!go.TryGetComponent<NetworkObject>(out var nob))
         {
             Destroy(go);
             return;
         }
 
-        _netManager.ServerManager.Spawn(go, conn);
+        _netmanager.ServerManager.Spawn(go, conn);
+    }
+
+    private int Assign(int client, int idx)
+    {
+        _assigned[client] = idx;
+        return idx;
+    }
+
+    private int NearestFree(int start, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            int x = (start + i) % count;
+            if (!_assigned.ContainsValue(x))
+                return x;
+        }
+
+        return Mathf.Clamp(start, 0, count - 1);
     }
 }

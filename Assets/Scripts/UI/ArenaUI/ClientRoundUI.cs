@@ -17,13 +17,12 @@ public class ClientRoundUI : MonoBehaviour
     void Awake()
     {
         Instance = this;
-
-        _uiDoc = GetComponent<UIDocument>();
+        InitializeUI();
     }
 
-    void Start()
+    private void InitializeUI()
     {
-        if (_uiDoc == null)
+        if (!TryGetComponent(out _uiDoc))
             return;
 
         var root = _uiDoc.rootVisualElement;

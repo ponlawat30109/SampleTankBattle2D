@@ -32,18 +32,15 @@ public class NetworkManagerController : MonoBehaviour
 
     private CancellationTokenSource _responderCts;
     private NetworkManager _netManager;
+    private float _lastClientConnectAttemptTime = -10f;
+    private const float ConnectFailureUiWindow = 5f;
 
     private void Awake()
     {
         _netManager = InstanceFinder.NetworkManager;
-        if (_netManager == null)
-            Debug.LogError("FishNet NetworkManager not found.");
-        else
-        {
-            _netManager.ClientManager.OnClientConnectionState += ClientManager_OnClientConnectionState;
-            _netManager.ServerManager.OnServerConnectionState += ServerManager_OnServerConnectionState;
-            _netManager.ServerManager.OnRemoteConnectionState += ServerManager_OnRemoteConnectionState_Limit;
-        }
+        _netManager.ClientManager.OnClientConnectionState += ClientManager_OnClientConnectionState;
+        _netManager.ServerManager.OnServerConnectionState += ServerManager_OnServerConnectionState;
+        _netManager.ServerManager.OnRemoteConnectionState += ServerManager_OnRemoteConnectionState_Limit;
     }
 
     private void Start()
@@ -56,7 +53,6 @@ public class NetworkManagerController : MonoBehaviour
     {
         if (_netManager == null)
             return;
-
         try
         {
             var host = await Task.Run(() => DiscoverHost(DiscoveryPort, DiscoveryTimeout));
@@ -66,63 +62,71 @@ public class NetworkManagerController : MonoBehaviour
                 ushort port = host.Item2;
                 if (DebugLogs)
                     Debug.Log($"Discovered host {ip}:{port} - joining...");
-                _netManager.ClientManager.StartConnection(ip, port);
+                StartLocalClientAndStamp(ip, port);
+                return;
             }
-            else
-            {
-                ushort portToUse = DefaultGamePort;
-                try
-                {
-                    ushort configured = _netManager.TransportManager.Transport.GetPort();
-                    if (configured != 0)
-                        portToUse = configured;
-                }
-                catch { }
 
-                if (DebugLogs)
-                    Debug.Log($"No host discovered - attempting to start host on port {portToUse}");
+            ushort portToUse = GetConfiguredPort() ?? DefaultGamePort;
+            if (DebugLogs)
+                Debug.Log($"No host discovered - attempting to start host on port {portToUse}");
 
-                try
-                {
-                    _netManager.ServerManager.StartConnection(portToUse);
-                }
-                catch (Exception ex)
-                {
-                    if (DebugLogs)
-                        Debug.LogWarning($"Start server threw exception: {ex.Message}");
-                }
-
-                int waited = 0;
-                int waitInterval = 100;
-                int maxWait = 1000;
-                while (waited < maxWait && !_netManager.IsServerStarted && !_netManager.IsHostStarted)
-                {
-                    await Task.Delay(waitInterval);
-                    waited += waitInterval;
-                }
-
-                if (_netManager.IsServerStarted || _netManager.IsHostStarted)
-                {
-                    if (DebugLogs)
-                        Debug.Log($"Server started successfully on port {portToUse}; starting local client.");
-
-                    _netManager.ClientManager.StartConnection("127.0.0.1", portToUse);
-
-                    _responderCts = new CancellationTokenSource();
-                    _ = Task.Run(() => DiscoveryResponderAsync(portToUse, _responderCts.Token));
-                }
-                else
-                {
-                    if (DebugLogs)
-                        Debug.LogWarning($"Server failed to start on port {portToUse}. Trying to join existing host at 127.0.0.1:{portToUse}");
-                    _netManager.ClientManager.StartConnection("127.0.0.1", portToUse);
-                }
-            }
+            await StartServerAndResponder(portToUse);
         }
         catch (Exception ex)
         {
             Debug.LogError($"AutoStart error: {ex}");
         }
+    }
+
+    private ushort? GetConfiguredPort()
+    {
+        ushort configured = _netManager.TransportManager.Transport.GetPort();
+        if (configured != 0)
+            return configured;
+        return null;
+    }
+
+    private async Task StartServerAndResponder(ushort portToUse)
+    {
+        try
+        {
+            _netManager.ServerManager.StartConnection(portToUse);
+        }
+        catch (Exception ex)
+        {
+            if (DebugLogs)
+                Debug.LogWarning($"Start server threw exception: {ex.Message}");
+        }
+        int waited = 0;
+        const int waitInterval = 100;
+        const int maxWait = 1000;
+        while (waited < maxWait && !_netManager.IsServerStarted && !_netManager.IsHostStarted)
+        {
+            await Task.Delay(waitInterval);
+            waited += waitInterval;
+        }
+
+        if (_netManager.IsServerStarted || _netManager.IsHostStarted)
+        {
+            if (DebugLogs)
+                Debug.Log($"Server started successfully on port {portToUse}; starting local client.");
+
+            StartLocalClientAndStamp("127.0.0.1", portToUse);
+            _responderCts = new CancellationTokenSource();
+            _ = Task.Run(() => DiscoveryResponderAsync(portToUse, _responderCts.Token));
+        }
+        else
+        {
+            if (DebugLogs)
+                Debug.LogWarning($"Server failed to start on port {portToUse}. Trying to join existing host at 127.0.0.1:{portToUse}");
+            StartLocalClientAndStamp("127.0.0.1", portToUse);
+        }
+    }
+
+    private void StartLocalClientAndStamp(string ip, ushort port)
+    {
+        _netManager.ClientManager.StartConnection(ip, port);
+        _lastClientConnectAttemptTime = Time.realtimeSinceStartup;
     }
 
     private Tuple<string, ushort> DiscoverHost(int discoveryPort, int timeoutMs)
@@ -151,12 +155,9 @@ public class NetworkManagerController : MonoBehaviour
                     }
                 }
             }
-            catch (SocketException) { }
+            catch (Exception) { }
         }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"DiscoverHost exception: {ex.Message}");
-        }
+        catch (Exception) { }
 
         return null;
     }
@@ -171,10 +172,10 @@ public class NetworkManagerController : MonoBehaviour
                 listener = new UdpClient(DiscoveryPort);
                 listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             }
-            catch (SocketException sx)
+            catch (Exception)
             {
                 if (DebugLogs)
-                    Debug.LogWarning($"Discovery responder failed to bind UDP {DiscoveryPort}: {sx.Message}");
+                    Debug.LogWarning($"Discovery responder failed to bind UDP {DiscoveryPort}");
                 return;
             }
 
@@ -202,7 +203,11 @@ public class NetworkManagerController : MonoBehaviour
                         if (DebugLogs)
                             Debug.Log($"Replied discovery to {result.RemoteEndPoint}");
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        if (DebugLogs)
+                            Debug.LogWarning($"Discovery responder send failed: {ex.Message}");
+                    }
                 }
             }
         }
@@ -212,7 +217,7 @@ public class NetworkManagerController : MonoBehaviour
         }
         finally
         {
-            try { listener?.Close(); listener?.Dispose(); } catch { }
+            listener?.Close(); listener?.Dispose();
             if (DebugLogs)
                 Debug.Log("Discovery responder stopped");
         }
@@ -230,6 +235,19 @@ public class NetworkManagerController : MonoBehaviour
         else if (args.ConnectionState == LocalConnectionState.Stopped)
         {
             Debug.Log("Connection state: Client Stopped");
+
+            float delta = Time.realtimeSinceStartup - _lastClientConnectAttemptTime;
+            if (delta <= ConnectFailureUiWindow)
+            {
+                if (DebugLogs)
+                    Debug.Log($"Recent connect attempt failed ({delta:F2}s) - showing session full UI.");
+
+                // var ui = FindAnyObjectByType<ClientRoundUI>();
+                // if (ui != null)
+                //     ui.ShowDeathAndStartCountdown("Session full — please try again later", 5f);
+                // else if (ClientRoundUI.Instance != null)
+                ClientRoundUI.Instance.ShowDeathAndStartCountdown("Session full — please try again later", 999f);
+            }
         }
     }
 
@@ -262,15 +280,16 @@ public class NetworkManagerController : MonoBehaviour
 
         if (_netManager != null)
         {
-            try { _netManager.ClientManager.OnClientConnectionState -= ClientManager_OnClientConnectionState; } catch { }
-            try { _netManager.ServerManager.OnServerConnectionState -= ServerManager_OnServerConnectionState; } catch { }
-            try { _netManager.ServerManager.OnRemoteConnectionState -= ServerManager_OnRemoteConnectionState_Limit; } catch { }
+            _netManager.ClientManager.OnClientConnectionState -= ClientManager_OnClientConnectionState;
+            _netManager.ServerManager.OnServerConnectionState -= ServerManager_OnServerConnectionState;
+            _netManager.ServerManager.OnRemoteConnectionState -= ServerManager_OnRemoteConnectionState_Limit;
         }
     }
 
     private void ServerManager_OnRemoteConnectionState_Limit(NetworkConnection conn, RemoteConnectionStateArgs args)
     {
-        if (_netManager == null) return;
+        if (_netManager == null)
+            return;
 
         if (args.ConnectionState != RemoteConnectionState.Started)
             return;
@@ -279,13 +298,18 @@ public class NetworkManagerController : MonoBehaviour
 
         if (MaxClients > 0 && connected > MaxClients)
         {
-            try
+            var relay = FindAnyObjectByType<ServerMessageRelay>();
+            if (relay != null)
+            {
+                relay.NotifyAndKick(conn, "Session full — please try again later", 5f, 0.8f);
+            }
+            else
             {
                 _netManager.ServerManager.Kick(conn, KickReason.UnusualActivity, FishNet.Managing.Logging.LoggingType.Common, "Server full");
-                if (DebugLogs)
-                    Debug.Log($"Server is full ({connected}/{MaxClients})");
             }
-            catch (Exception) { }
+
+            if (DebugLogs)
+                Debug.Log($"Server is full ({connected}/{MaxClients})");
         }
     }
 
@@ -295,6 +319,7 @@ public class NetworkManagerController : MonoBehaviour
         if (_netManager == null) return;
         _netManager.ServerManager.StartConnection(port);
         _netManager.ClientManager.StartConnection("127.0.0.1", port);
+        _lastClientConnectAttemptTime = Time.realtimeSinceStartup;
         _responderCts = new CancellationTokenSource();
         _ = Task.Run(() => DiscoveryResponderAsync(port, _responderCts.Token));
     }
@@ -308,8 +333,8 @@ public class NetworkManagerController : MonoBehaviour
     public void StopAll()
     {
         if (_netManager == null) return;
-        try { _netManager.ClientManager.StopConnection(); } catch { }
-        try { _netManager.ServerManager.StopConnection(true); } catch { }
+        _netManager.ClientManager.StopConnection();
+        _netManager.ServerManager.StopConnection(true);
 
         if (_responderCts != null && !_responderCts.IsCancellationRequested)
         {

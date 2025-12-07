@@ -533,6 +533,7 @@ GameObject:
   - component: {fileID: 7360947040305543902}
   - component: {fileID: 7360947040305543903}
   - component: {fileID: 7360947040305543901}
+  - component: {fileID: 7360947040305543904}
   m_Layer: 0
   m_Name: Manager
   m_TagString: Untagged
@@ -589,8 +590,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bd30dcc3f4943324294396209a1ada09, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerSpawnerController
-  <PlayerPrefab>k__BackingField: {fileID: 8709080105147008570, guid: d7d12b06d82dad04faed6ac60549528f, type: 3}
-  <SpawnPoints>k__BackingField:
+  PlayerPrefab: {fileID: 8709080105147008570, guid: d7d12b06d82dad04faed6ac60549528f, type: 3}
+  SpawnPoints:
   - {fileID: 2236465755590920023}
   - {fileID: 6197463019287821182}
   - {fileID: 552725318004855022}
@@ -628,6 +629,18 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameRoundController
   restartDelay: 5
+--- !u!114 &7360947040305543904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7360947040305543898}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14c1f6765a7f40145a2c7934d11a3578, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ServerMessageRelay
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

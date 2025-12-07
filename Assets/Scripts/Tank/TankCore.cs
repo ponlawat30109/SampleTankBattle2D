@@ -52,10 +52,10 @@ namespace TankBattle.Tank
             GameRoundController.Instance.UnregisterTank(this);
         }
 
-        private void OnDestroy()
-        {
-            GameRoundController.Instance.UnregisterTank(this);
-        }
+        // private void OnDestroy()
+        // {
+        //     GameRoundController.Instance.UnregisterTank(this);
+        // }
 
         #region HP
         public void Server_ApplyDamage(NetworkConnection attacker, int damage, Vector2 knockback, float stagger = 0.4f, float iframe = 0.6f)

@@ -1,7 +1,7 @@
 <ui:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements" noNamespaceSchemaLocation="../../UIElementsSchema/UIElements.xsd" editor-extension-mode="False">
     <Style src="project://database/Assets/UI/ArenaUI/ArenaStyle.uss?fileID=7433441132597879392&amp;guid=3e0595820380bcb41b0d0f7fa6bccbc6&amp;type=3#ArenaStyle" />
     <ui:VisualElement style="flex-grow: 1; background-color: rgb(176, 176, 188);">
-        <ui:Label name="centerText" text="TTTTTTTTTTTTTTTTTTTTTTTTT" style="position: absolute; left: auto; top: 40%; transform: ; font-size: 28px; unity-text-align: middle; color: white; justify-content: center; align-self: center; -unity-text-align: middle-center; white-space: pre; align-items: center; align-content: center;" />
-        <ui:Label name="countdownText" text="99999999999999" style="position: absolute; left: auto; top: 50%; transform: ; font-size: 22px; unity-text-align: middle; color: yellow; justify-content: center; align-self: center; align-content: center; align-items: center; -unity-text-align: upper-center; text-overflow: clip;" />
+        <ui:Label name="centerText" text="TTTTTTTTTTTTTTTTTTTTTTTTT" style="top: 40%; position: absolute; align-items: center; justify-content: center; align-self: center; align-content: center; font-size: 60px; color: rgb(255, 214, 0);" />
+        <ui:Label name="countdownText" text="99999999999999" style="position: absolute; top: 50%; align-items: center; justify-content: center; align-self: center; align-content: center; font-size: 60px; color: rgb(255, 214, 0);" />
     </ui:VisualElement>
 </ui:UXML>
