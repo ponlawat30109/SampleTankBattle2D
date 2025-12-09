@@ -4,10 +4,7 @@ using FishNet.Managing.Client;
 using FishNet.Managing.Server;
 using FishNet.Connection;
 using System;
-
 using System.Threading.Tasks;
-
-
 using FishNet.Transporting;
 using UnityEngine;
 using FishNet.Managing.Observing;
