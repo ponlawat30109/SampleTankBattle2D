@@ -49,13 +49,15 @@ namespace TankBattle.Tank
         public override void OnStopNetwork()
         {
             base.OnStopNetwork();
-            GameRoundController.Instance.UnregisterTank(this);
+            if (GameRoundController.Instance != null)
+                GameRoundController.Instance.UnregisterTank(this);
         }
 
-        // private void OnDestroy()
-        // {
-        //     GameRoundController.Instance.UnregisterTank(this);
-        // }
+        private void OnDestroy()
+        {
+             if (GameRoundController.Instance != null)
+            GameRoundController.Instance.UnregisterTank(this);
+        }
 
         #region HP
         public void Server_ApplyDamage(NetworkConnection attacker, int damage, Vector2 knockback, float stagger = 0.4f, float iframe = 0.6f)
