@@ -6,9 +6,9 @@ using FishNet.Connection;
 using System;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
+using UnityEngine.Networking;
+using System.Linq;
 using FishNet.Transporting;
 using UnityEngine;
 using FishNet.Managing.Observing;
@@ -19,25 +19,41 @@ public class NetworkManagerController : MonoBehaviour
 {
     [Header("Auto Host/Join")]
     public bool AutoStartOnLaunch = true;
-    public int DiscoveryPort = 47777;
-    public int DiscoveryTimeout = 1000;
+    public bool AutoStartLocalClient = true;
     public ushort DefaultGamePort = 7777;
     public bool DebugLogs = false;
 
     [Header("Server Limits")]
     public int MaxClients = 2;
 
-    private const string REQ = "TANKBATTLE_DISCOVERY_REQUEST_v1";
-    private const string RESP_PREFIX = "TANKBATTLE_HOST_v1|";
-
-    private CancellationTokenSource _responderCts;
     private NetworkManager _netManager;
     private float _lastClientConnectAttemptTime = -10f;
     private const float ConnectFailureUiWindow = 5f;
 
+    [Header("Client Timeout")]
+    public float ConnectTimeoutSeconds = 10f;
+    public int ConnectRetryCount = 3;
+    public float ConnectRetryDelaySeconds = 2f;
+
+    [Header("Auto Network")]
+    public bool AutoDetectPublicIP = true;
+    public bool AutoFallbackToHost = false;
+
     private void Awake()
     {
         _netManager = InstanceFinder.NetworkManager;
+
+        var transport = _netManager.TransportManager.Transport;
+        if (transport != null)
+        {
+            transport.SetMaximumClients(MaxClients);
+            if (transport.GetPort() == 0)
+                transport.SetPort(DefaultGamePort);
+            transport.SetServerBindAddress(string.Empty, IPAddressType.IPv4);
+            if (DebugLogs)
+                Debug.Log($"Transport configured: port={transport.GetPort()}, maxClients={transport.GetMaximumClients()}");
+        }
+
         _netManager.ClientManager.OnClientConnectionState += ClientManager_OnClientConnectionState;
         _netManager.ServerManager.OnServerConnectionState += ServerManager_OnServerConnectionState;
         _netManager.ServerManager.OnRemoteConnectionState += ServerManager_OnRemoteConnectionState_Limit;
@@ -53,50 +69,59 @@ public class NetworkManagerController : MonoBehaviour
     {
         if (_netManager == null)
             return;
-        try
-        {
-            var host = await Task.Run(() => DiscoverHost(DiscoveryPort, DiscoveryTimeout));
-            if (host != null)
-            {
-                string ip = host.Item1;
-                ushort port = host.Item2;
-                if (DebugLogs)
-                    Debug.Log($"Discovered host {ip}:{port} - joining...");
-                StartLocalClientAndStamp(ip, port);
-                return;
-            }
 
-            ushort portToUse = GetConfiguredPort() ?? DefaultGamePort;
-            if (DebugLogs)
-                Debug.Log($"No host discovered - attempting to start host on port {portToUse}");
+        ushort portToUse = GetConfiguredPort() ?? DefaultGamePort;
+        if (DebugLogs)
+            Debug.Log($"AutoStart: starting host on port {portToUse}");
 
-            await StartServerAndResponder(portToUse);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"AutoStart error: {ex}");
-        }
+        await StartServerAndResponder(portToUse);
     }
 
     private ushort? GetConfiguredPort()
     {
-        ushort configured = _netManager.TransportManager.Transport.GetPort();
+        var transport = _netManager.TransportManager.Transport;
+        if (transport == null) return null;
+        ushort configured = transport.GetPort();
         if (configured != 0)
             return configured;
         return null;
     }
 
-    private async Task StartServerAndResponder(ushort portToUse)
+    private string[] GetLocalIPv4Addresses()
     {
         try
         {
-            _netManager.ServerManager.StartConnection(portToUse);
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            var list = new System.Collections.Generic.List<string>();
+            foreach (var ip in host.AddressList)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                    list.Add(ip.ToString());
+            }
+            if (list.Count == 0)
+                list.Add("127.0.0.1");
+            return list.ToArray();
         }
         catch (Exception ex)
         {
             if (DebugLogs)
-                Debug.LogWarning($"Start server threw exception: {ex.Message}");
+                Debug.LogWarning($"GetLocalIPv4Addresses failed: {ex.Message}");
+            return new string[] { "127.0.0.1" };
         }
+    }
+
+    private async Task StartServerAndResponder(ushort portToUse)
+    {
+        var transport = _netManager.TransportManager.Transport;
+        if (transport != null)
+        {
+            transport.SetPort(portToUse);
+            transport.SetMaximumClients(MaxClients);
+            transport.SetServerBindAddress(string.Empty, IPAddressType.IPv4);
+        }
+
+        _netManager.ServerManager.StartConnection(portToUse);
+
         int waited = 0;
         const int waitInterval = 100;
         const int maxWait = 1000;
@@ -111,116 +136,154 @@ public class NetworkManagerController : MonoBehaviour
             if (DebugLogs)
                 Debug.Log($"Server started successfully on port {portToUse}; starting local client.");
 
-            StartLocalClientAndStamp("127.0.0.1", portToUse);
-            _responderCts = new CancellationTokenSource();
-            _ = Task.Run(() => DiscoveryResponderAsync(portToUse, _responderCts.Token));
+            var ips = GetLocalIPv4Addresses();
+            Debug.Log($"Local IPs: {string.Join(", ", ips)} (listening port {portToUse})");
+
+            if (AutoStartLocalClient)
+                StartLocalClientAndStamp("127.0.0.1", portToUse);
         }
         else
         {
             if (DebugLogs)
-                Debug.LogWarning($"Server failed to start on port {portToUse}. Trying to join existing host at 127.0.0.1:{portToUse}");
-            StartLocalClientAndStamp("127.0.0.1", portToUse);
+                Debug.LogWarning($"Server failed to start on port {portToUse}. Trying to start local client anyway.");
+            if (AutoStartLocalClient)
+                StartLocalClientAndStamp("127.0.0.1", portToUse);
         }
     }
 
     private void StartLocalClientAndStamp(string ip, ushort port)
     {
-        _netManager.ClientManager.StartConnection(ip, port);
-        _lastClientConnectAttemptTime = Time.realtimeSinceStartup;
+        StartClient(ip, port);
     }
 
-    private Tuple<string, ushort> DiscoverHost(int discoveryPort, int timeoutMs)
+    private async void StartClient(string ip, ushort port)
     {
-        try
+        if (_netManager == null)
+            return;
+
+        if (AutoDetectPublicIP)
         {
-            using var client = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
-            client.EnableBroadcast = true;
-            client.Client.ReceiveTimeout = timeoutMs;
-
-            var req = Encoding.UTF8.GetBytes(REQ);
-            var broadcastEP = new IPEndPoint(IPAddress.Broadcast, discoveryPort);
-            client.Send(req, req.Length, broadcastEP);
-
-            var remote = new IPEndPoint(IPAddress.Any, 0);
             try
             {
-                var data = client.Receive(ref remote);
-                var s = Encoding.UTF8.GetString(data);
-                if (s.StartsWith(RESP_PREFIX))
-                {
-                    var portStr = s.Substring(RESP_PREFIX.Length);
-                    if (ushort.TryParse(portStr, out ushort hostPort))
-                    {
-                        return Tuple.Create(remote.Address.ToString(), hostPort);
-                    }
-                }
+                string pub = await GetPublicIPAddressAsync();
+                if (!string.IsNullOrEmpty(pub) && string.IsNullOrEmpty(ip))
+                    ip = pub;
             }
-            catch (Exception) { }
+            catch { }
         }
-        catch (Exception) { }
 
-        return null;
+        var candidates = GetAutoConnectCandidates(ip);
+
+        foreach (var candidate in candidates)
+        {
+            for (int r = 0; r < ConnectRetryCount && !_netManager.IsClientStarted; r++)
+            {
+                if (ClientRoundUI.Instance != null)
+                    ClientRoundUI.Instance.ShowPersistent(r == 0 ? "Connecting..." : $"Reconnecting... (attempt {r + 1})");
+
+                if (DebugLogs)
+                    Debug.Log($"Attempting client connection to {candidate}:{port} (attempt {r + 1}/{ConnectRetryCount})");
+
+                var transport = _netManager.TransportManager.Transport;
+                if (transport != null)
+                {
+                    transport.SetClientAddress(candidate);
+                    transport.SetPort(port);
+                }
+
+                _netManager.ClientManager.StartConnection(candidate, port);
+                _lastClientConnectAttemptTime = Time.realtimeSinceStartup;
+
+                bool ok = await WaitForClientStarted(ConnectTimeoutSeconds);
+                if (ok)
+                {
+                    if (ClientRoundUI.Instance != null)
+                        ClientRoundUI.Instance.HidePersistent();
+                    if (DebugLogs)
+                        Debug.Log($"Client connected to {candidate}:{port}");
+                    _lastClientConnectAttemptTime = -10f;
+                    return;
+                }
+
+                _netManager.ClientManager.StopConnection();
+
+                if (r < ConnectRetryCount - 1)
+                    await Task.Delay(TimeSpan.FromSeconds(ConnectRetryDelaySeconds));
+            }
+        }
+
+        if (ClientRoundUI.Instance != null)
+        {
+            ClientRoundUI.Instance.HidePersistent();
+            ClientRoundUI.Instance.ShowDeathAndStartCountdown("Could not connect — please try again later", 5f);
+        }
+        if (DebugLogs)
+            Debug.LogWarning($"Failed to connect to any candidate for port {port}");
+
+        if (AutoFallbackToHost)
+        {
+            if (DebugLogs) Debug.Log("No host found — falling back to start host on this machine.");
+            await StartServerAndResponder(port);
+        }
+        _lastClientConnectAttemptTime = -10f;
     }
 
-    private async Task DiscoveryResponderAsync(ushort serverPort, CancellationToken token)
+    private async Task<string> GetPublicIPAddressAsync()
     {
-        UdpClient listener = null;
         try
         {
-            try
+            using (var uwr = UnityWebRequest.Get("https://api.ipify.org"))
             {
-                listener = new UdpClient(DiscoveryPort);
-                listener.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            }
-            catch (Exception)
-            {
-                if (DebugLogs)
-                    Debug.LogWarning($"Discovery responder failed to bind UDP {DiscoveryPort}");
-                return;
-            }
-
-            if (DebugLogs)
-                Debug.Log($"Discovery responder listening on UDP {DiscoveryPort}");
-
-            while (!token.IsCancellationRequested)
-            {
-                UdpReceiveResult result;
-                try
+                uwr.timeout = 5;
+                await uwr.SendWebRequest();
+                if (uwr.result == UnityWebRequest.Result.Success)
                 {
-                    result = await listener.ReceiveAsync().ConfigureAwait(false);
-                }
-                catch (ObjectDisposedException) { break; }
-                catch (SocketException) { break; }
-
-                string msg = Encoding.UTF8.GetString(result.Buffer);
-                if (msg == REQ)
-                {
-                    var resp = RESP_PREFIX + serverPort.ToString();
-                    var bytes = Encoding.UTF8.GetBytes(resp);
-                    try
-                    {
-                        await listener.SendAsync(bytes, bytes.Length, result.RemoteEndPoint).ConfigureAwait(false);
-                        if (DebugLogs)
-                            Debug.Log($"Replied discovery to {result.RemoteEndPoint}");
-                    }
-                    catch (Exception ex)
-                    {
-                        if (DebugLogs)
-                            Debug.LogWarning($"Discovery responder send failed: {ex.Message}");
-                    }
+                    return uwr.downloadHandler.text.Trim();
                 }
             }
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"DiscoveryResponder error: {ex}");
+            if (DebugLogs) Debug.LogWarning($"Public IP detection failed: {ex.Message}");
         }
-        finally
+        return null;
+    }
+
+    private async Task<bool> WaitForClientStarted(float timeoutSeconds)
+    {
+        float waited = 0f;
+        const float poll = 0.2f;
+        while (waited < timeoutSeconds)
         {
-            listener?.Close(); listener?.Dispose();
-            if (DebugLogs)
-                Debug.Log("Discovery responder stopped");
+            if (_netManager.IsClientStarted) return true;
+            await Task.Delay(TimeSpan.FromSeconds(poll));
+            waited += poll;
         }
+        return _netManager.IsClientStarted;
+    }
+
+    private string[] GetAutoConnectCandidates(string providedIp)
+    {
+        var list = new System.Collections.Generic.List<string>();
+        if (!string.IsNullOrEmpty(providedIp)) list.Add(providedIp);
+        list.Add("127.0.0.1");
+        try
+        {
+            var locals = GetLocalIPv4Addresses();
+            foreach (var l in locals) list.Add(l);
+            if (locals.Length > 0)
+            {
+                var parts = locals[0].Split('.');
+                if (parts.Length == 4)
+                {
+                    parts[3] = "1"; list.Add(string.Join('.', parts));
+                    parts[3] = "254"; list.Add(string.Join('.', parts));
+                }
+            }
+        }
+        catch { }
+
+        return list.Distinct().ToArray();
     }
 
     private void ClientManager_OnClientConnectionState(ClientConnectionStateArgs args)
@@ -231,6 +294,8 @@ public class NetworkManagerController : MonoBehaviour
         if (args.ConnectionState == LocalConnectionState.Started)
         {
             Debug.Log("Connection state: Client Started");
+            ClientRoundUI.Instance.HidePersistent();
+            _lastClientConnectAttemptTime = -10f;
         }
         else if (args.ConnectionState == LocalConnectionState.Stopped)
         {
@@ -242,11 +307,11 @@ public class NetworkManagerController : MonoBehaviour
                 if (DebugLogs)
                     Debug.Log($"Recent connect attempt failed ({delta:F2}s) - showing session full UI.");
 
-                // var ui = FindAnyObjectByType<ClientRoundUI>();
-                // if (ui != null)
-                //     ui.ShowDeathAndStartCountdown("Session full — please try again later", 5f);
-                // else if (ClientRoundUI.Instance != null)
+                if (ClientRoundUI.Instance != null)
+                    ClientRoundUI.Instance.HidePersistent();
                 ClientRoundUI.Instance.ShowDeathAndStartCountdown("Session full — please try again later", 999f);
+
+                _lastClientConnectAttemptTime = -10f;
             }
         }
     }
@@ -271,13 +336,6 @@ public class NetworkManagerController : MonoBehaviour
 
     private void OnDestroy()
     {
-        if (_responderCts != null && !_responderCts.IsCancellationRequested)
-        {
-            _responderCts.Cancel();
-            _responderCts.Dispose();
-            _responderCts = null;
-        }
-
         if (_netManager != null)
         {
             _netManager.ClientManager.OnClientConnectionState -= ClientManager_OnClientConnectionState;
@@ -313,35 +371,40 @@ public class NetworkManagerController : MonoBehaviour
         }
     }
 
-    #region Manual Controls
-    public void StartHost(ushort port)
-    {
-        if (_netManager == null) return;
-        _netManager.ServerManager.StartConnection(port);
-        _netManager.ClientManager.StartConnection("127.0.0.1", port);
-        _lastClientConnectAttemptTime = Time.realtimeSinceStartup;
-        _responderCts = new CancellationTokenSource();
-        _ = Task.Run(() => DiscoveryResponderAsync(port, _responderCts.Token));
-    }
+    // #region Manual Controls
+    // public void StartHost(ushort port)
+    // {
+    //     if (_netManager == null)
+    //         return;
 
-    public void StartClient(string ip, ushort port)
-    {
-        if (_netManager == null) return;
-        _netManager.ClientManager.StartConnection(ip, port);
-    }
+    //     var transport = _netManager.TransportManager.Transport;
+    //     if (transport != null)
+    //     {
+    //         transport.SetPort(port);
+    //         transport.SetMaximumClients(MaxClients);
+    //         transport.SetServerBindAddress(string.Empty, IPAddressType.IPv4);
+    //     }
 
-    public void StopAll()
-    {
-        if (_netManager == null) return;
-        _netManager.ClientManager.StopConnection();
-        _netManager.ServerManager.StopConnection(true);
+    //     _netManager.ServerManager.StartConnection(port);
+    //     if (AutoStartLocalClient)
+    //         StartLocalClientAndStamp("127.0.0.1", port);
+    //     _lastClientConnectAttemptTime = Time.realtimeSinceStartup;
+    // }
 
-        if (_responderCts != null && !_responderCts.IsCancellationRequested)
-        {
-            _responderCts.Cancel();
-            _responderCts.Dispose();
-            _responderCts = null;
-        }
-    }
-    #endregion 
+    // public void ManualStartClient(string ip, ushort port)
+    // {
+    //     if (_netManager == null)
+    //         return;
+
+    //     StartClient(ip, port);
+    // }
+
+    // public void StopAll()
+    // {
+    //     if (_netManager == null)
+    //         return;
+    //     _netManager.ClientManager.StopConnection();
+    //     _netManager.ServerManager.StopConnection(true);
+    // }
+    // #endregion 
 }

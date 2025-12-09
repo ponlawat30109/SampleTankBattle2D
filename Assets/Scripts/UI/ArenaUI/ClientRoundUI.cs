@@ -13,6 +13,7 @@ public class ClientRoundUI : MonoBehaviour
     private Label _centerLabel;
     private Label _countdownLabel;
     private Coroutine _countdownCoroutine;
+    private bool _persistent = false;
 
     void Awake()
     {
@@ -34,13 +35,40 @@ public class ClientRoundUI : MonoBehaviour
 
     public void ShowDeathAndStartCountdown(string message, float seconds)
     {
-        if (_uiDoc == null) return;
+        if (_uiDoc == null)
+            return;
+
+        _persistent = false;
+
         if (_countdownCoroutine != null)
             StopCoroutine(_countdownCoroutine);
 
         _centerLabel.text = message;
         _centerLabel.style.display = DisplayStyle.Flex;
         _countdownCoroutine = StartCoroutine(CountdownRoutine(seconds));
+    }
+
+    public void ShowPersistent(string message)
+    {
+        if (_uiDoc == null) return;
+        if (_countdownCoroutine != null)
+        {
+            StopCoroutine(_countdownCoroutine);
+            _countdownCoroutine = null;
+        }
+
+        _centerLabel.text = message;
+        _centerLabel.style.display = DisplayStyle.Flex;
+        if (_countdownLabel != null)
+            _countdownLabel.style.display = DisplayStyle.None;
+
+        _persistent = true;
+    }
+
+    public void HidePersistent()
+    {
+        _persistent = false;
+        HideAll();
     }
 
     private IEnumerator CountdownRoutine(float seconds)

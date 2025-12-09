@@ -32,17 +32,29 @@ This project targets **Unity 6.3 LTS**. If you are using a different Unity edito
    - If no host exists on the network, the instance will try to start a server and then start a local client.
    - If a host exists, the client will attempt to discover and connect automatically.
 
+Auto discovery behavior
+
+- The `NetworkManagerController` component exposes inspector toggles:
+  - `AutoDiscovery`: when enabled the client will retry discovery a few times before falling back to starting a server.
+  - `DiscoveryRetryCount` / `DiscoveryRetryIntervalMs`: control how often and how many times discovery is retried.
+  - `AutoStartLocalClient`: when disabled the host will not start a local client (useful for running a dedicated host machine).
+
+Adjust these on the `NetworkManagerController` component in your Scene to tune auto-join behavior across machines.
+
 ## Controls
 
 - Input actions are defined in `Assets/Scripts/Tank/InputMap/PlayerInputMap.inputactions` (Unity Input System). Check tank scripts under `Assets/Scripts/Tank/` to see the mapped actions.
 
 ## Troubleshooting
 
-- Tank does not spawn:
+- Check Unity Console for server/client startup logs.
+- Verify `NetworkManagerController` calls `StartConnection` / `StartHost` and that `_netManager.IsServerStarted` or `_netManager.IsHostStarted` becomes true before the client attempts to spawn.
 
-  - Check Unity Console for server/client startup logs.
-  - Verify `NetworkManagerController` calls `StartConnection` / `StartHost` and that `_netManager.IsServerStarted` or `_netManager.IsHostStarted` becomes true before the client attempts to spawn.
-  - If you recently refactored code, ensure the local client is started only after the server is ready.
+Connecting across machines:
+
+- When running a host on a different machine, make sure the host machine's firewall allows UDP/TCP on the game port (default `7777`) and the discovery port (`47777`).
+- The server will log local IP addresses when it starts (check Console) — use one of those IPs from the client `StartClient` call or let discovery find the host.
+- If discovery fails, confirm both machines are on the same subnet and that broadcast packets are not blocked by the network.
 
 - UI message not appearing on kick:
   - Ensure `ClientRoundUI` has a `UIDocument` with `Label` elements named `centerText` and `countdownText`.
