@@ -12,6 +12,7 @@ using System.Linq;
 using FishNet.Transporting;
 using UnityEngine;
 using FishNet.Managing.Observing;
+using System.Net.NetworkInformation;
 
 [RequireComponent(typeof(NetworkManager))]
 [RequireComponent(typeof(ObserverManager))]
@@ -71,10 +72,27 @@ public class NetworkManagerController : MonoBehaviour
             return;
 
         ushort portToUse = GetConfiguredPort() ?? DefaultGamePort;
+
+        if (IsPortInUse(portToUse))
+        {
+            if (DebugLogs)
+                Debug.Log($"AutoStart: Port {portToUse} is already in use. Starting as Client only.");
+            if (AutoStartLocalClient)
+                StartLocalClientAndStamp("127.0.0.1", portToUse);
+            return;
+        }
+
         if (DebugLogs)
             Debug.Log($"AutoStart: starting host on port {portToUse}");
 
         await StartServerAndResponder(portToUse);
+    }
+
+    private bool IsPortInUse(ushort port)
+    {
+        var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
+        var udpListeners = ipGlobalProperties.GetActiveUdpListeners();
+        return udpListeners.Any(e => e.Port == port);
     }
 
     private ushort? GetConfiguredPort()
