@@ -37,6 +37,7 @@ public class NetworkManagerController : MonoBehaviour
     public float ConnectRetryDelaySeconds = 2f;
 
     [Header("Auto Network")]
+    public string RemoteHostIP;
     public bool AutoDetectPublicIP = true;
     public bool AutoFallbackToHost = false;
 
@@ -72,6 +73,14 @@ public class NetworkManagerController : MonoBehaviour
             return;
 
         ushort portToUse = GetConfiguredPort() ?? DefaultGamePort;
+
+        if (!string.IsNullOrEmpty(RemoteHostIP))
+        {
+            if (DebugLogs)
+                Debug.Log($"AutoStart: RemoteHostIP set to '{RemoteHostIP}'. Starting as Client.");
+            StartClient(RemoteHostIP, portToUse);
+            return;
+        }
 
         if (IsPortInUse(portToUse))
         {
@@ -156,6 +165,27 @@ public class NetworkManagerController : MonoBehaviour
 
             var ips = GetLocalIPv4Addresses();
             Debug.Log($"Local IPs: {string.Join(", ", ips)} (listening port {portToUse})");
+
+            // Display Public IP for Host
+            if (AutoDetectPublicIP)
+            {
+                if (ClientRoundUI.Instance != null)
+                    ClientRoundUI.Instance.ShowServerIP("Fetching...");
+
+                // We are already on the Unity Context here because we are in an async Task started from Start()
+                try
+                {
+                    string pubIp = await GetPublicIPAddressAsync();
+                    if (!string.IsNullOrEmpty(pubIp) && ClientRoundUI.Instance != null)
+                        ClientRoundUI.Instance.ShowServerIP(pubIp);
+                }
+                catch (Exception ex) 
+                {
+                    if (DebugLogs) Debug.LogWarning($"Could not fetch/show IP: {ex.Message}");
+                    if (ClientRoundUI.Instance != null)
+                         ClientRoundUI.Instance.ShowServerIP("Error fetching IP");
+                }
+            }
 
             if (AutoStartLocalClient)
                 StartLocalClientAndStamp("127.0.0.1", portToUse);

@@ -8,10 +8,12 @@ public class ClientRoundUI : MonoBehaviour
 
     private readonly string centerText = "centerText";
     private readonly string countdownText = "countdownText";
+    private readonly string ipAddressText = "ipAddressText";
 
     private UIDocument _uiDoc;
     private Label _centerLabel;
     private Label _countdownLabel;
+    private Label _ipLabel;
     private Coroutine _countdownCoroutine;
     private bool _persistent = false;
 
@@ -29,6 +31,7 @@ public class ClientRoundUI : MonoBehaviour
         var root = _uiDoc.rootVisualElement;
         _centerLabel = root.Q<Label>(centerText);
         _countdownLabel = root.Q<Label>(countdownText);
+        _ipLabel = root.Q<Label>(ipAddressText);
 
         HideAll();
     }
@@ -45,6 +48,7 @@ public class ClientRoundUI : MonoBehaviour
 
         _centerLabel.text = message;
         _centerLabel.style.display = DisplayStyle.Flex;
+
         _countdownCoroutine = StartCoroutine(CountdownRoutine(seconds));
     }
 
@@ -63,6 +67,19 @@ public class ClientRoundUI : MonoBehaviour
             _countdownLabel.style.display = DisplayStyle.None;
 
         _persistent = true;
+    }
+
+    public void ShowServerIP(string ip)
+    {
+        if (_uiDoc == null) return;
+
+        ShowPersistent("Waiting for player...");
+        
+        if (_ipLabel != null)
+        {
+            _ipLabel.text = $"HOST IP: {ip}";
+            _ipLabel.style.display = DisplayStyle.Flex;
+        }
     }
 
     public void HidePersistent()
