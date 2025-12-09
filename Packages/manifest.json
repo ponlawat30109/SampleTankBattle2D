@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.alven.fishnet.unitytransport": "https://github.com/ooonush/FishyUnityTransport.git?path=Assets/FishNet/Plugins/FishyUnityTransport",
     "com.antigravity.ide": "https://github.com/prithvi-bharadwaj/Antigravity-IDE.git",
     "com.unity.2d.animation": "13.0.2",
     "com.unity.2d.aseprite": "3.0.1",
@@ -16,6 +17,7 @@
     "com.unity.multiplayer.playmode": "2.0.1",
     "com.unity.nuget.newtonsoft-json": "3.2.2",
     "com.unity.render-pipelines.universal": "17.3.0",
+    "com.unity.services.multiplayer": "2.0.0",
     "com.unity.test-framework": "1.6.0",
     "com.unity.timeline": "1.8.9",
     "com.unity.ugui": "2.0.0",
