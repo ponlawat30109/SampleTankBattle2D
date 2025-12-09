@@ -4,15 +4,14 @@ using FishNet.Managing.Client;
 using FishNet.Managing.Server;
 using FishNet.Connection;
 using System;
-using System.Net;
-using System.Net.Sockets;
+
 using System.Threading.Tasks;
-using UnityEngine.Networking;
-using System.Linq;
+
+
 using FishNet.Transporting;
 using UnityEngine;
 using FishNet.Managing.Observing;
-using System.Net.NetworkInformation;
+
 
 [RequireComponent(typeof(NetworkManager))]
 [RequireComponent(typeof(ObserverManager))]
@@ -82,12 +81,12 @@ public class NetworkManagerController : MonoBehaviour
             return;
         }
 
-        if (IsPortInUse(portToUse))
+        if (NetworkAddressUtils.IsPortInUse(portToUse))
         {
             if (DebugLogs)
                 Debug.Log($"AutoStart: Port {portToUse} is already in use. Starting as Client only.");
             if (AutoStartLocalClient)
-                StartLocalClientAndStamp("127.0.0.1", portToUse);
+                StartLocalClientAndStamp(NetworkAddressUtils.DefaultLocalAddress, portToUse);
             return;
         }
 
@@ -97,12 +96,7 @@ public class NetworkManagerController : MonoBehaviour
         await StartServerAndResponder(portToUse);
     }
 
-    private bool IsPortInUse(ushort port)
-    {
-        var ipGlobalProperties = IPGlobalProperties.GetIPGlobalProperties();
-        var udpListeners = ipGlobalProperties.GetActiveUdpListeners();
-        return udpListeners.Any(e => e.Port == port);
-    }
+
 
     private ushort? GetConfiguredPort()
     {
@@ -114,28 +108,7 @@ public class NetworkManagerController : MonoBehaviour
         return null;
     }
 
-    private string[] GetLocalIPv4Addresses()
-    {
-        try
-        {
-            var host = Dns.GetHostEntry(Dns.GetHostName());
-            var list = new System.Collections.Generic.List<string>();
-            foreach (var ip in host.AddressList)
-            {
-                if (ip.AddressFamily == AddressFamily.InterNetwork)
-                    list.Add(ip.ToString());
-            }
-            if (list.Count == 0)
-                list.Add("127.0.0.1");
-            return list.ToArray();
-        }
-        catch (Exception ex)
-        {
-            if (DebugLogs)
-                Debug.LogWarning($"GetLocalIPv4Addresses failed: {ex.Message}");
-            return new string[] { "127.0.0.1" };
-        }
-    }
+
 
     private async Task StartServerAndResponder(ushort portToUse)
     {
@@ -163,7 +136,7 @@ public class NetworkManagerController : MonoBehaviour
             if (DebugLogs)
                 Debug.Log($"Server started successfully on port {portToUse}; starting local client.");
 
-            var ips = GetLocalIPv4Addresses();
+            var ips = NetworkAddressUtils.GetLocalIPv4Addresses();
             Debug.Log($"Local IPs: {string.Join(", ", ips)} (listening port {portToUse})");
 
             // Display Public IP for Host
@@ -175,7 +148,7 @@ public class NetworkManagerController : MonoBehaviour
                 // We are already on the Unity Context here because we are in an async Task started from Start()
                 try
                 {
-                    string pubIp = await GetPublicIPAddressAsync();
+                    string pubIp = await NetworkAddressUtils.GetPublicIPAddressAsync();
                     if (!string.IsNullOrEmpty(pubIp) && ClientRoundUI.Instance != null)
                         ClientRoundUI.Instance.ShowServerIP(pubIp);
                 }
@@ -188,14 +161,14 @@ public class NetworkManagerController : MonoBehaviour
             }
 
             if (AutoStartLocalClient)
-                StartLocalClientAndStamp("127.0.0.1", portToUse);
+                StartLocalClientAndStamp(NetworkAddressUtils.DefaultLocalAddress, portToUse);
         }
         else
         {
             if (DebugLogs)
                 Debug.LogWarning($"Server failed to start on port {portToUse}. Trying to start local client anyway.");
             if (AutoStartLocalClient)
-                StartLocalClientAndStamp("127.0.0.1", portToUse);
+                StartLocalClientAndStamp(NetworkAddressUtils.DefaultLocalAddress, portToUse);
         }
     }
 
@@ -213,14 +186,14 @@ public class NetworkManagerController : MonoBehaviour
         {
             try
             {
-                string pub = await GetPublicIPAddressAsync();
+                string pub = await NetworkAddressUtils.GetPublicIPAddressAsync();
                 if (!string.IsNullOrEmpty(pub) && string.IsNullOrEmpty(ip))
                     ip = pub;
             }
             catch { }
         }
 
-        var candidates = GetAutoConnectCandidates(ip);
+        var candidates = NetworkAddressUtils.GetAutoConnectCandidates(ip);
 
         foreach (var candidate in candidates)
         {
@@ -276,26 +249,7 @@ public class NetworkManagerController : MonoBehaviour
         _lastClientConnectAttemptTime = -10f;
     }
 
-    private async Task<string> GetPublicIPAddressAsync()
-    {
-        try
-        {
-            using (var uwr = UnityWebRequest.Get("https://api.ipify.org"))
-            {
-                uwr.timeout = 5;
-                await uwr.SendWebRequest();
-                if (uwr.result == UnityWebRequest.Result.Success)
-                {
-                    return uwr.downloadHandler.text.Trim();
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            if (DebugLogs) Debug.LogWarning($"Public IP detection failed: {ex.Message}");
-        }
-        return null;
-    }
+
 
     private async Task<bool> WaitForClientStarted(float timeoutSeconds)
     {
@@ -310,29 +264,7 @@ public class NetworkManagerController : MonoBehaviour
         return _netManager.IsClientStarted;
     }
 
-    private string[] GetAutoConnectCandidates(string providedIp)
-    {
-        var list = new System.Collections.Generic.List<string>();
-        if (!string.IsNullOrEmpty(providedIp)) list.Add(providedIp);
-        list.Add("127.0.0.1");
-        try
-        {
-            var locals = GetLocalIPv4Addresses();
-            foreach (var l in locals) list.Add(l);
-            if (locals.Length > 0)
-            {
-                var parts = locals[0].Split('.');
-                if (parts.Length == 4)
-                {
-                    parts[3] = "1"; list.Add(string.Join('.', parts));
-                    parts[3] = "254"; list.Add(string.Join('.', parts));
-                }
-            }
-        }
-        catch { }
 
-        return list.Distinct().ToArray();
-    }
 
     private void ClientManager_OnClientConnectionState(ClientConnectionStateArgs args)
     {
@@ -418,41 +350,4 @@ public class NetworkManagerController : MonoBehaviour
                 Debug.Log($"Server is full ({connected}/{MaxClients})");
         }
     }
-
-    // #region Manual Controls
-    // public void StartHost(ushort port)
-    // {
-    //     if (_netManager == null)
-    //         return;
-
-    //     var transport = _netManager.TransportManager.Transport;
-    //     if (transport != null)
-    //     {
-    //         transport.SetPort(port);
-    //         transport.SetMaximumClients(MaxClients);
-    //         transport.SetServerBindAddress(string.Empty, IPAddressType.IPv4);
-    //     }
-
-    //     _netManager.ServerManager.StartConnection(port);
-    //     if (AutoStartLocalClient)
-    //         StartLocalClientAndStamp("127.0.0.1", port);
-    //     _lastClientConnectAttemptTime = Time.realtimeSinceStartup;
-    // }
-
-    // public void ManualStartClient(string ip, ushort port)
-    // {
-    //     if (_netManager == null)
-    //         return;
-
-    //     StartClient(ip, port);
-    // }
-
-    // public void StopAll()
-    // {
-    //     if (_netManager == null)
-    //         return;
-    //     _netManager.ClientManager.StopConnection();
-    //     _netManager.ServerManager.StopConnection(true);
-    // }
-    // #endregion 
 }
